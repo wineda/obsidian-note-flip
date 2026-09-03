@@ -1,0 +1,10 @@
+{
+  "id": "note-flip",
+  "name": "Note Flip",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Flip through your notes in a Windows Aero Flip 3D style stack of glass cards.",
+  "author": "wineda",
+  "authorUrl": "https://github.com/wineda/obsidian-note-flip",
+  "isDesktopOnly": false
+}
