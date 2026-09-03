@@ -64,9 +64,16 @@ Windows Vista / 7 の **Aero Flip 3D** 風の UI で、Obsidian のノートを�
 2. 保管庫の `.obsidian/plugins/note-flip/` フォルダを作り、3 つのファイルを置きます。
 3. Obsidian を再読み込みし、「設定 → コミュニティプラグイン」で **Note Flip** を有効化します。
 
-### BRAT を使う
+### BRAT を使う（自動更新）
 
-[BRAT](https://github.com/TfTHacker/obsidian42-brat) に `wineda/obsidian-note-flip` を追加します。
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) を使うと、新しいリリースが出たときに自動で更新できます。
+
+1. コミュニティプラグインから **BRAT** をインストールして有効化します。
+2. BRAT の設定で **Add Beta plugin** を押し、`wineda/obsidian-note-flip` を入力して追加します。
+3. BRAT の設定で **Auto-update plugins at startup** をオンにすると、Obsidian 起動時に最新リリースへ自動更新されます。
+   手動で更新したいときは、コマンドパレットの **BRAT: Check for updates to all beta plugins and UPDATE** を実行します。
+
+BRAT は GitHub Releases に添付された `main.js` / `manifest.json` / `styles.css` を取得するので、[Releases](https://github.com/wineda/obsidian-note-flip/releases) に新しいバージョンが公開されるたびに更新対象になります。
 
 ## 開発
 
@@ -77,7 +84,13 @@ npm run build   # 型チェック + 本番ビルド
 ```
 
 ビルドされた `main.js` と `manifest.json`、`styles.css` を保管庫の `.obsidian/plugins/note-flip/` にコピー（またはシンボリックリンク）して動作確認してください。
-タグを push すると GitHub Actions がリリースを作成し、3 ファイルを添付します。
+### リリース手順
+
+1. `npm version patch`（または `minor` / `major`）を実行すると、`package.json` / `manifest.json` / `versions.json` のバージョンが上がり、同名のタグが作られます。
+2. `git push origin main --follow-tags` でタグを push します。
+3. GitHub Actions の Release ワークフローがビルドして GitHub Release を作成し、`main.js` / `manifest.json` / `styles.css` を添付します。BRAT はこのリリースを検出して更新します。
+
+タグ名は `manifest.json` の `version` と一致している必要があります（ワークフローが検証します）。タグを push せず、Actions タブから Release ワークフローを手動実行しても同じリリースが作られます。
 
 ### 構成
 

@@ -1,26 +1,55 @@
 name: Release
 
+# Creates a GitHub release with main.js, manifest.json and styles.css so that
+# BRAT (and manual installs) can pick up new versions.
+#
+# - Push a tag that matches manifest.json's version (e.g. `git tag 0.2.0 && git push origin 0.2.0`)
+# - Or run this workflow manually: the version is read from manifest.json and the tag is created.
+
 on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+
       - run: npm ci
       - run: npm run build
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="${GITHUB_REF#refs/tags/}"
+          else
+            version="$(node -p "require('./manifest.json').version")"
+          fi
+          manifest_version="$(node -p "require('./manifest.json').version")"
+          if [[ "$version" != "$manifest_version" ]]; then
+            echo "Tag $version does not match manifest.json version $manifest_version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" --title "$tag" --generate-notes main.js manifest.json styles.css
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes \
+            main.js manifest.json styles.css
