@@ -24,15 +24,15 @@ Windows Vista / 7 の **Aero Flip 3D** 風の UI で、Obsidian のノートを�
 ## 使い方
 
 1. コマンドパレットから **「ノートをめくる (Flip 3D)」** を実行するか、左リボンのレイヤーアイコンをクリックします。
-2. カードをめくって目的のノートを選び、`Enter` かクリックで開きます。`Esc` または背景クリックで閉じます。
+2. カードをめくって目的のノートを選び、`Enter` かダブルクリックで開きます。`Esc` または背景クリックで閉じます。
 
 | キー | 動作 |
 | --- | --- |
 | `Tab` / `→` / `↓` / `PageDown` / `Space` / ホイール下 | 次のノートへ |
 | `Shift+Tab` / `←` / `↑` / `PageUp` / ホイール上 | 前のノートへ |
 | `Home` / `End` | 先頭 / 末尾へ |
-| `Enter` / 前面カードをクリック | 選択中のノートを開く |
-| 奥のカードをクリック | そのカードを前面に持ってくる（ダブルクリックで直接開く） |
+| `Enter` / カードをダブルクリック | 選択中のノートを開く |
+| カード（左上のタイトル）をクリック | そのカードを前面に持ってくる |
 | 文字キー / `Backspace` | タイトルで絞り込み / 1 文字削除 |
 | `Esc` / 背景クリック | 閉じる |
 
@@ -105,14 +105,16 @@ npm run build   # 型チェック + 本番ビルド
 
 ### 実装メモ
 
-- カードの位置は CSS カスタムプロパティ `--d`（前面からの深さ）だけで決まり、めくりは `--d` を書き換えて CSS トランジションに任せています。
+- カードの位置は CSS カスタムプロパティ `--d`（前面からの深さ）と `--ty`（縦オフセット）で決まり、めくりはこれらを書き換えて CSS トランジションに任せています。
+- `--ty` はプラグインが画面を計測して透視投影を計算し、どのカードのタイトルバーも手前のカードに隠れないように深さごとに解いています。積み上げが画面に収まらない場合はカードを縮めます。
+- ダブルクリックは `dblclick` イベントではなく、クリックの時刻と位置から判定しています。1 回目のクリックでカードが前面に移動するため、2 回目のクリックは別のカード要素に着地することが多いからです。
 - Chromium は 3D 変形されている要素に `backdrop-filter` を適用しないため、ガラスのフレームは半透明のグラデーションで描いています。背景のワークスペースは `.modal-bg` 側でぼかしています。
 - 見える枚数より奥のカードは、最後尾の 1 つ奥に「待機」させて透明にしているので、前後どちらにめくってもカードが奥から出てくるように見えます。
 
 ## English
 
 An Obsidian plugin that flips through your notes in a Windows Aero **Flip 3D** style stack of glass cards.
-Trigger it from the command palette or the ribbon, flip with `Tab` / arrows / mouse wheel, type to filter, and press `Enter` to open.
+Trigger it from the command palette or the ribbon, flip with `Tab` / arrows / mouse wheel, type to filter, and press `Enter` (or double-click a card) to open. Clicking a card's title brings it to the front, and the stack is laid out so that every title bar stays visible.
 Bind it to a hotkey with a modifier (for example `Ctrl+Tab`) and releasing the modifier opens the selected note, just like Alt+Tab.
 UI strings follow Obsidian's language setting (English and Japanese are included).
 

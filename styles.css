@@ -106,14 +106,18 @@
   position: absolute;
   width: var(--nf-card-w);
   height: var(--nf-card-h);
-  /* Front card sits lower-left; the stack recedes to the upper right. */
-  left: calc(50% - var(--nf-card-w) / 2 - var(--nf-x) * var(--nf-depth, 6) * 0.4);
-  top: calc(50% - var(--nf-card-h) / 2 + var(--nf-y) * var(--nf-depth, 6) * 0.2 - 3vh);
+  /* Front card sits lower-left; the stack recedes to the upper right.
+     The plugin measures the stage and sets --nf-left, --nf-top, --nf-x, --nf-z
+     and each card's --ty so that every title bar clears the card in front of
+     it and the cascade stays on screen; the calc() fallbacks only apply until
+     that first measurement. */
+  left: var(--nf-left, calc(50% - var(--nf-card-w) / 2 - var(--nf-x) * var(--nf-depth, 6) * 0.4));
+  top: var(--nf-top, calc(50% - var(--nf-card-h) / 2 + var(--nf-y) * var(--nf-depth, 6) * 0.2 - 3vh));
   transform-origin: 50% 50%;
   transform:
     translate3d(
       calc(var(--d, 0) * var(--nf-x)),
-      calc(var(--d, 0) * var(--nf-y) * -1),
+      var(--ty, calc(var(--d, 0) * var(--nf-y) * -1)),
       calc(var(--d, 0) * var(--nf-z) * -1)
     )
     rotateY(var(--nf-tilt, 28deg));
@@ -134,7 +138,7 @@
   transform:
     translate3d(
       calc(var(--d, 0) * var(--nf-x)),
-      calc(var(--d, 0) * var(--nf-y) * -1 + 80px),
+      calc(var(--ty, calc(var(--d, 0) * var(--nf-y) * -1)) + 80px),
       calc(var(--d, 0) * var(--nf-z) * -1 - 400px)
     )
     rotateY(var(--nf-tilt, 28deg));
