@@ -1,8 +1,9 @@
 import { Notice, Plugin } from "obsidian";
 import { FlipModal } from "./flipModal";
 import { t } from "./i18n";
+import { ListModal } from "./listModal";
 import { collectNotes } from "./noteSource";
-import { DEFAULT_SETTINGS, NoteFlipSettings, NoteFlipSettingTab, NoteSource } from "./settings";
+import { DEFAULT_SETTINGS, NoteFlipSettings, NoteFlipSettingTab, NoteSource, ViewStyle } from "./settings";
 
 const TRACKED_MODIFIERS = new Set(["Alt", "Control", "Meta"]);
 
@@ -36,18 +37,31 @@ export default class NoteFlipPlugin extends Plugin {
       name: t("cmdOpenAll"),
       callback: () => this.openFlip("all"),
     });
+    this.addCommand({
+      id: "open-list",
+      name: t("cmdOpenList"),
+      callback: () => this.openFlip(this.settings.source, "list"),
+    });
+    this.addCommand({
+      id: "open-flip3d",
+      name: t("cmdOpenFlip"),
+      callback: () => this.openFlip(this.settings.source, "flip"),
+    });
 
     this.addSettingTab(new NoteFlipSettingTab(this.app, this));
     this.refreshRibbon();
   }
 
-  openFlip(source: NoteSource = this.settings.source): void {
-    const files = collectNotes(this.app, source, this.settings.maxCards);
+  openFlip(source: NoteSource = this.settings.source, style: ViewStyle = this.settings.viewStyle): void {
+    const max = style === "list" ? this.settings.listMaxFiles : this.settings.maxCards;
+    const files = collectNotes(this.app, source, max);
     if (!files.length) {
       new Notice(t("noNotes"));
       return;
     }
-    new FlipModal(this.app, this, files, new Set(this.heldModifiers)).open();
+    const held = new Set(this.heldModifiers);
+    if (style === "list") new ListModal(this.app, this, files, held).open();
+    else new FlipModal(this.app, this, files, held).open();
   }
 
   refreshRibbon(): void {

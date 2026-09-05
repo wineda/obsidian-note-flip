@@ -2,7 +2,6 @@ import {
   App,
   Component,
   MarkdownRenderer,
-  MarkdownView,
   Modal,
   Platform,
   TFile,
@@ -12,6 +11,7 @@ import {
 } from "obsidian";
 import type NoteFlipPlugin from "./main";
 import { t } from "./i18n";
+import { openNote } from "./openNote";
 
 interface Card {
   file: TFile;
@@ -478,19 +478,8 @@ export class FlipModal extends Modal {
     }
     this.opening = true;
     const file = card.file;
-    const { workspace } = this.app;
-
-    const existing = workspace
-      .getLeavesOfType("markdown")
-      .find((leaf) => leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path);
-
     this.close();
-    if (existing) {
-      workspace.setActiveLeaf(existing, { focus: true });
-      return;
-    }
-    const leaf = workspace.getLeaf(this.plugin.settings.openInNewTab ? "tab" : false);
-    await leaf.openFile(file);
+    await openNote(this.app, file, this.plugin.settings.openInNewTab);
   }
 
   // ---------------------------------------------------------------------------

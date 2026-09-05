@@ -4,10 +4,13 @@ import { t } from "./i18n";
 
 export type NoteSource = "recent" | "open" | "all";
 export type CardTheme = "aero" | "obsidian";
+export type ViewStyle = "flip" | "list";
 
 export interface NoteFlipSettings {
+  viewStyle: ViewStyle;
   source: NoteSource;
   maxCards: number;
+  listMaxFiles: number;
   startOnPrevious: boolean;
 
   releaseModifierToOpen: boolean;
@@ -29,8 +32,10 @@ export interface NoteFlipSettings {
 }
 
 export const DEFAULT_SETTINGS: NoteFlipSettings = {
+  viewStyle: "list",
   source: "recent",
   maxCards: 12,
+  listMaxFiles: 500,
   startOnPrevious: true,
 
   releaseModifierToOpen: true,
@@ -65,6 +70,19 @@ export class NoteFlipSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(t("settingsSourceHeading")).setHeading();
 
     new Setting(containerEl)
+      .setName(t("settingsStyle"))
+      .setDesc(t("settingsStyleDesc"))
+      .addDropdown((d) =>
+        d
+          .addOptions({ list: t("styleList"), flip: t("styleFlip") })
+          .setValue(s.viewStyle)
+          .onChange(async (v) => {
+            s.viewStyle = v as ViewStyle;
+            await save();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName(t("settingsSource"))
       .setDesc(t("settingsSourceDesc"))
       .addDropdown((d) =>
@@ -91,6 +109,20 @@ export class NoteFlipSettingTab extends PluginSettingTab {
           .setDynamicTooltip()
           .onChange(async (v) => {
             s.maxCards = v;
+            await save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName(t("settingsListMax"))
+      .setDesc(t("settingsListMaxDesc"))
+      .addSlider((sl) =>
+        sl
+          .setLimits(50, 3000, 50)
+          .setValue(s.listMaxFiles)
+          .setDynamicTooltip()
+          .onChange(async (v) => {
+            s.listMaxFiles = v;
             await save();
           }),
       );

@@ -11,6 +11,7 @@ Windows Vista / 7 の **Aero Flip 3D** 風の UI で、Obsidian のノートを�
 
 - **Flip 3D スタック**: ノートをガラスのカードとして斜めに積み上げ、3D パースペクティブで表示
 - **Alt+Tab 風の操作**: `Alt` / `Ctrl` / `Cmd` を含むホットキーで起動した場合、修飾キーを離した瞬間に選択中のノートを開く
+- **リスト (fzf 風) 表示**: 入力欄 + 「ファイル名 | 一致部分」の一覧 + プレビュー。ファイル名と本文で絞り込み、一致箇所をハイライト
 - **めくり操作**: `Tab` / `Shift+Tab`、矢印キー、`PageUp` / `PageDown`、`Home` / `End`、マウスホイール、スワイプ（モバイル）
 - **文字入力で絞り込み**: スタック表示中に文字を打つと、タイトルとパスであいまい検索
 - **Markdown プレビュー**: 各カードにノートの冒頭を整形済み Markdown で表示（プレーンテキストにも切替可）
@@ -24,7 +25,25 @@ Windows Vista / 7 の **Aero Flip 3D** 風の UI で、Obsidian のノートを�
 ## 使い方
 
 1. コマンドパレットから **「ノートをめくる (Flip 3D)」** を実行するか、左リボンのレイヤーアイコンをクリックします。
-2. カードをめくって目的のノートを選び、`Enter` かダブルクリックで開きます。`Esc` または背景クリックで閉じます。
+2. 「設定 → 表示スタイル」で選んだスタイル（リスト / Flip 3D）で開きます。
+   - **リスト (fzf 風)**: 画面中央のポップアップ。上に入力欄、下に「ファイル名 | 一致部分」の一覧、右に選択中ノートのプレビュー。文字を入力するとファイル名（あいまい一致）と本文（全文検索、空白区切りで AND）で絞り込まれ、一致箇所がハイライトされます。プレビューは最初の一致箇所まで自動でスクロールします。
+   - **Flip 3D**: ガラスのカードを 3D に積み重ねてめくります。
+3. `Enter` かダブルクリックで開きます。`Esc` または背景クリックで閉じます。
+
+スタイルを固定したコマンド **「ノートを検索 (fzf 風リスト)」** / **「ノートをめくる (Flip 3D スタック)」** もあるので、それぞれにホットキーを割り当てられます。
+
+### リスト (fzf 風) のキー操作
+
+| キー | 動作 |
+| --- | --- |
+| 文字入力 | ファイル名・本文で絞り込み |
+| `↓` / `↑` / `Tab` / `Shift+Tab` / `Ctrl+N` / `Ctrl+P` / `Ctrl+J` / `Ctrl+K` | 選択を移動 |
+| `PageDown` / `PageUp` | 10 件ずつ移動 |
+| `Enter` / 行をダブルクリック | 選択中のノートを開く |
+| 行をクリック | その行を選択（プレビューを更新） |
+| `Esc` / 背景クリック | 閉じる |
+
+### Flip 3D のキー操作
 
 | キー | 動作 |
 | --- | --- |
@@ -113,7 +132,7 @@ npm run build   # 型チェック + 本番ビルド
 
 ## English
 
-An Obsidian plugin that flips through your notes in a Windows Aero **Flip 3D** style stack of glass cards.
+An Obsidian plugin that flips through your notes in a Windows Aero **Flip 3D** style stack of glass cards, or picks them from an **fzf style** popup (query box, `file name | match` rows, preview) that searches names and contents as you type. Choose the style in the settings.
 Trigger it from the command palette or the ribbon, flip with `Tab` / arrows / mouse wheel, type to filter, and press `Enter` (or double-click a card) to open. Clicking a card's title brings it to the front, and the stack is laid out so that every title bar stays visible.
 Bind it to a hotkey with a modifier (for example `Ctrl+Tab`) and releasing the modifier opens the selected note, just like Alt+Tab.
 UI strings follow Obsidian's language setting (English and Japanese are included).
