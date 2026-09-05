@@ -1,6 +1,6 @@
 {
   "name": "obsidian-note-flip",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Flip through your notes in a Windows Aero Flip 3D style stack of glass cards.",
   "main": "main.js",
   "scripts": {
