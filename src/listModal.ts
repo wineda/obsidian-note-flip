@@ -21,7 +21,17 @@ interface Row {
   snippet: string;
   /** Whether the snippet contains the query (as opposed to being the first line). */
   snippetMatches: boolean;
+  /** 0-based line of the match in the file on disk, so the editor can scroll to it. */
+  line: number | null;
 }
+
+/** A note's text with the front matter stripped, and how many lines that removed. */
+interface Body {
+  text: string;
+  lineOffset: number;
+}
+
+const EMPTY_BODY: Body = { text: "", lineOffset: 0 };
 
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 /** Longest snippet shown in the match column. */
@@ -105,8 +115,20 @@ function firstLine(body: string): string {
   return "";
 }
 
-/** The line holding the earliest occurrence of any term, clipped around it. */
-function matchingLine(body: string, terms: string[]): string | null {
+function countLines(text: string): number {
+  let count = 0;
+  for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count++;
+  return count;
+}
+
+/** Strip the front matter and remember how many lines were dropped in front of the body. */
+function toBody(raw: string): Body {
+  const text = raw.replace(FRONTMATTER_RE, "").trimStart();
+  return { text, lineOffset: countLines(raw.slice(0, raw.length - text.length)) };
+}
+
+/** The line holding the earliest occurrence of any term, clipped around it, with its 0-based index. */
+function matchingLine(body: string, terms: string[]): { line: string; index: number } | null {
   const lower = body.toLowerCase();
   let earliest = -1;
   for (const term of terms) {
@@ -125,7 +147,7 @@ function matchingLine(body: string, terms: string[]): string | null {
     const from = Math.max(0, Math.min(offset - SNIPPET_LEAD_CHARS, line.length - SNIPPET_CHARS));
     line = (from > 0 ? "…" : "") + line.slice(from, from + SNIPPET_CHARS) + "…";
   }
-  return line;
+  return { line, index: countLines(body.slice(0, lineStart)) };
 }
 
 /**
@@ -135,7 +157,7 @@ function matchingLine(body: string, terms: string[]): string | null {
  */
 export class ListModal extends Modal {
   private readonly renderComponent = new Component();
-  private readonly bodies = new Map<string, string>();
+  private readonly bodies = new Map<string, Body>();
   private rows: Row[] = [];
   private index = 0;
   private query = "";
@@ -237,10 +259,9 @@ export class ListModal extends Modal {
       await Promise.all(
         batch.map(async (file) => {
           try {
-            const text = await this.app.vault.cachedRead(file);
-            this.bodies.set(file.path, text.replace(FRONTMATTER_RE, "").trimStart());
+            this.bodies.set(file.path, toBody(await this.app.vault.cachedRead(file)));
           } catch {
-            this.bodies.set(file.path, "");
+            this.bodies.set(file.path, EMPTY_BODY);
           }
         }),
       );
@@ -252,13 +273,14 @@ export class ListModal extends Modal {
   }
 
   private rowFor(file: TFile, terms: string[]): Row {
-    const body = this.bodies.get(file.path) ?? "";
-    const snippet = terms.length ? matchingLine(body, terms) : null;
+    const body = this.bodies.get(file.path) ?? EMPTY_BODY;
+    const match = terms.length ? matchingLine(body.text, terms) : null;
     return {
       file,
       nameMatch: null,
-      snippet: snippet ?? firstLine(body),
-      snippetMatches: snippet !== null,
+      snippet: match ? match.line : firstLine(body.text),
+      snippetMatches: match !== null,
+      line: match ? body.lineOffset + match.index : null,
     };
   }
 
@@ -351,10 +373,10 @@ export class ListModal extends Modal {
     if (!row) return;
 
     const s = this.plugin.settings;
-    let text = this.bodies.get(row.file.path);
+    let text = this.bodies.get(row.file.path)?.text;
     if (text === undefined) {
       try {
-        text = (await this.app.vault.cachedRead(row.file)).replace(FRONTMATTER_RE, "").trimStart();
+        text = toBody(await this.app.vault.cachedRead(row.file)).text;
       } catch {
         text = "";
       }
@@ -414,9 +436,10 @@ export class ListModal extends Modal {
       return;
     }
     this.opening = true;
-    const file = row.file;
+    const { file, line } = row;
     this.close();
-    await openNote(this.app, file, this.plugin.settings.openInNewTab);
+    // Jump to the matching line so the hit is on screen, not just the note.
+    await openNote(this.app, file, this.plugin.settings.openInNewTab, line ?? undefined);
   }
 
   // ---------------------------------------------------------------------------
