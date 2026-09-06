@@ -29,9 +29,13 @@ interface Row {
 interface Body {
   text: string;
   lineOffset: number;
+  /** First non-empty line, shown as the snippet when there is no query. */
+  first: string;
+  /** Lower-cased text, built on the first search and kept for later keystrokes. */
+  lower?: string;
 }
 
-const EMPTY_BODY: Body = { text: "", lineOffset: 0 };
+const EMPTY_BODY: Body = { text: "", lineOffset: 0, first: "" };
 
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 /** Longest snippet shown in the match column. */
@@ -44,6 +48,10 @@ const MAX_ROWS = 300;
 const PREVIEW_CHARS = 30000;
 /** Files read concurrently while the note texts are loaded. */
 const READ_BATCH = 24;
+/** While notes are still loading, a query's results are recomputed at most this often. */
+const REFRESH_THROTTLE_MS = 150;
+/** Quiet time after the selection last moved before the preview is rendered. */
+const PREVIEW_DEBOUNCE_MS = 60;
 const PAGE_STEP = 10;
 
 /** Split the query into terms; every term has to occur in a note for it to match. */
@@ -106,11 +114,16 @@ function highlightTree(root: HTMLElement, terms: string[]): HTMLElement | null {
   return first;
 }
 
-/** First line of the body, used as the snippet when there is no query. */
+/** First non-empty line of the body, used as the snippet when there is no query. */
 function firstLine(body: string): string {
-  for (const line of body.split(/\r?\n/)) {
-    const trimmed = line.trim();
+  // Scan line by line instead of splitting the whole note; the body has its
+  // leading whitespace stripped, so this usually returns after one line.
+  for (let start = 0; start < body.length; ) {
+    const at = body.indexOf("\n", start);
+    const end = at < 0 ? body.length : at;
+    const trimmed = body.slice(start, end).trim();
     if (trimmed) return trimmed.slice(0, SNIPPET_CHARS);
+    start = end + 1;
   }
   return "";
 }
@@ -124,22 +137,29 @@ function countLines(text: string): number {
 /** Strip the front matter and remember how many lines were dropped in front of the body. */
 function toBody(raw: string): Body {
   const text = raw.replace(FRONTMATTER_RE, "").trimStart();
-  return { text, lineOffset: countLines(raw.slice(0, raw.length - text.length)) };
+  return { text, lineOffset: countLines(raw.slice(0, raw.length - text.length)), first: firstLine(text) };
+}
+
+/** Lower-cased note text, computed once per note rather than once per keystroke. */
+function lowerOf(body: Body): string {
+  if (body.lower === undefined) body.lower = body.text.toLowerCase();
+  return body.lower;
 }
 
 /** The line holding the earliest occurrence of any term, clipped around it, with its 0-based index. */
-function matchingLine(body: string, terms: string[]): { line: string; index: number } | null {
-  const lower = body.toLowerCase();
+function matchingLine(body: Body, terms: string[]): { line: string; index: number } | null {
+  const text = body.text;
+  const lower = lowerOf(body);
   let earliest = -1;
   for (const term of terms) {
     const at = lower.indexOf(term);
     if (at < 0) return null;
     if (earliest < 0 || at < earliest) earliest = at;
   }
-  const lineStart = body.lastIndexOf("\n", earliest) + 1;
-  const lineEndAt = body.indexOf("\n", earliest);
-  const lineEnd = lineEndAt < 0 ? body.length : lineEndAt;
-  const rawLine = body.slice(lineStart, lineEnd);
+  const lineStart = text.lastIndexOf("\n", earliest) + 1;
+  const lineEndAt = text.indexOf("\n", earliest);
+  const lineEnd = lineEndAt < 0 ? text.length : lineEndAt;
+  const rawLine = text.slice(lineStart, lineEnd);
   const leading = rawLine.length - rawLine.trimStart().length;
   const offset = earliest - lineStart - leading;
   let line = rawLine.trim();
@@ -147,7 +167,7 @@ function matchingLine(body: string, terms: string[]): { line: string; index: num
     const from = Math.max(0, Math.min(offset - SNIPPET_LEAD_CHARS, line.length - SNIPPET_CHARS));
     line = (from > 0 ? "…" : "") + line.slice(from, from + SNIPPET_CHARS) + "…";
   }
-  return { line, index: countLines(body.slice(0, lineStart)) };
+  return { line, index: countLines(text.slice(0, lineStart)) };
 }
 
 /**
@@ -158,13 +178,22 @@ function matchingLine(body: string, terms: string[]): { line: string; index: num
 export class ListModal extends Modal {
   private readonly renderComponent = new Component();
   private readonly bodies = new Map<string, Body>();
+  /** Position of every candidate in `files`; with no query the rows are in the same order. */
+  private readonly fileIndex = new Map<string, number>();
   private rows: Row[] = [];
+  /** Row elements currently on screen, parallel to the first MAX_ROWS of `rows`. */
+  private rowEls: HTMLElement[] = [];
+  private selectedEl: HTMLElement | null = null;
   private index = 0;
   private query = "";
   private loading = true;
   private closed = false;
   private opening = false;
   private previewToken = 0;
+  /** `path\nquery` of the preview last rendered (or in flight), to skip redundant renders. */
+  private previewedKey: string | null = null;
+  private previewTimer = 0;
+  private refreshTimer = 0;
 
   private inputEl!: HTMLInputElement;
   private counterEl!: HTMLElement;
@@ -199,6 +228,7 @@ export class ListModal extends Modal {
     this.previewBodyEl = this.previewEl.createDiv({ cls: "nf-list-preview-body markdown-rendered" });
     this.buildHints();
 
+    this.files.forEach((file, i) => this.fileIndex.set(file.path, i));
     this.rows = this.files.map((file) => this.rowFor(file, []));
     this.index = s.startOnPrevious && this.rows.length > 1 ? 1 : 0;
     this.renderRows();
@@ -209,9 +239,13 @@ export class ListModal extends Modal {
 
   onClose(): void {
     this.closed = true;
+    window.clearTimeout(this.previewTimer);
+    window.clearTimeout(this.refreshTimer);
     this.renderComponent.unload();
     this.bodies.clear();
     this.rows = [];
+    this.rowEls = [];
+    this.selectedEl = null;
     this.contentEl.empty();
   }
 
@@ -251,7 +285,12 @@ export class ListModal extends Modal {
   // Data
   // ---------------------------------------------------------------------------
 
-  /** Read every candidate note so that the query can search their contents. */
+  /**
+   * Read every candidate note so that the query can search their contents.
+   * Each batch only touches what it changes: with no query the affected rows
+   * get their snippet filled in where they are, and with a query the result
+   * list is recomputed at a throttled pace instead of once per batch.
+   */
   private async loadBodies(): Promise<void> {
     const pending = this.files.slice();
     while (pending.length && !this.closed) {
@@ -266,19 +305,45 @@ export class ListModal extends Modal {
         }),
       );
       if (this.closed) return;
-      this.refresh(true);
+      if (queryTerms(this.query).length) this.scheduleRefresh();
+      else this.fillSnippets(batch);
     }
     this.loading = false;
-    if (!this.closed) this.refresh(true);
+    if (this.closed) return;
+    window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = 0;
+    if (queryTerms(this.query).length) this.refresh(true);
+    else this.updateCounter();
+  }
+
+  /** Put the first line of freshly loaded notes into their rows without rebuilding the list. */
+  private fillSnippets(files: TFile[]): void {
+    for (const file of files) {
+      const i = this.fileIndex.get(file.path);
+      if (i === undefined) continue;
+      const row = this.rows[i];
+      if (!row || row.file !== file) continue;
+      row.snippet = (this.bodies.get(file.path) ?? EMPTY_BODY).first;
+      const el = this.rowEls[i];
+      if (el) el.querySelector(".nf-list-snippet")?.setText(row.snippet);
+    }
+  }
+
+  private scheduleRefresh(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = 0;
+      if (!this.closed) this.refresh(true);
+    }, REFRESH_THROTTLE_MS);
   }
 
   private rowFor(file: TFile, terms: string[]): Row {
     const body = this.bodies.get(file.path) ?? EMPTY_BODY;
-    const match = terms.length ? matchingLine(body.text, terms) : null;
+    const match = terms.length ? matchingLine(body, terms) : null;
     return {
       file,
       nameMatch: null,
-      snippet: match ? match.line : firstLine(body.text),
+      snippet: match ? match.line : body.first,
       snippetMatches: match !== null,
       line: match ? body.lineOffset + match.index : null,
     };
@@ -318,9 +383,13 @@ export class ListModal extends Modal {
   private renderRows(): void {
     const terms = queryTerms(this.query);
     this.listEl.empty();
+    this.rowEls = [];
+    this.selectedEl = null;
+    // Rows are built off-screen and attached in one go. Clicks are handled by
+    // a single listener on the list (see registerListeners), not per row.
+    const fragment = createFragment();
     this.rows.slice(0, MAX_ROWS).forEach((row, i) => {
-      const el = this.listEl.createDiv({ cls: "nf-list-row" });
-      el.setAttr("role", "option");
+      const el = fragment.createDiv({ cls: "nf-list-row", attr: { role: "option", "aria-selected": "false" } });
       el.dataset.index = String(i);
 
       const nameEl = el.createDiv({ cls: "nf-list-name" });
@@ -333,41 +402,60 @@ export class ListModal extends Modal {
       const snippetEl = el.createDiv({ cls: "nf-list-snippet" });
       if (row.snippetMatches) appendHighlighted(snippetEl, row.snippet, terms);
       else snippetEl.setText(row.snippet);
-
-      el.addEventListener("click", (evt) => {
-        evt.preventDefault();
-        this.select(i);
-        this.inputEl.focus();
-      });
-      el.addEventListener("dblclick", (evt) => {
-        evt.preventDefault();
-        this.index = i;
-        void this.openSelected();
-      });
+      this.rowEls.push(el);
     });
+    const total = this.rows.length;
+    this.listEl.toggleClass("nf-list-empty", total === 0);
+    if (!total) fragment.createDiv({ cls: "nf-list-none", text: t("noMatch") });
+    this.listEl.appendChild(fragment);
     this.updateSelection();
   }
 
   private updateSelection(): void {
-    const children = Array.from(this.listEl.children) as HTMLElement[];
-    children.forEach((el, i) => {
-      const selected = i === this.index;
-      el.toggleClass("is-selected", selected);
-      el.setAttr("aria-selected", String(selected));
-      if (selected) el.scrollIntoView({ block: "nearest" });
-    });
+    const el = this.rowEls[this.index] ?? null;
+    const previous = this.selectedEl;
+    if (previous && previous !== el) {
+      previous.removeClass("is-selected");
+      previous.setAttr("aria-selected", "false");
+    }
+    if (el) {
+      el.addClass("is-selected");
+      el.setAttr("aria-selected", "true");
+      el.scrollIntoView({ block: "nearest" });
+    }
+    this.selectedEl = el;
+    this.updateCounter();
+    this.schedulePreview();
+  }
+
+  private updateCounter(): void {
     const total = this.rows.length;
     const shown = Math.min(total, MAX_ROWS);
     const position = total ? `${this.index + 1}/${total}` : "0/0";
     this.counterEl.setText(this.loading ? `${position} ${t("listLoading")}` : shown < total ? `${position} (${shown})` : position);
-    this.listEl.toggleClass("nf-list-empty", total === 0);
-    if (!total) this.listEl.createDiv({ cls: "nf-list-none", text: t("noMatch") });
-    void this.renderPreview();
+  }
+
+  /**
+   * Render the preview once the selection has settled. Holding an arrow key
+   * would otherwise render every note the cursor passes over, and the render
+   * is skipped entirely when the same note is already showing.
+   */
+  private schedulePreview(): void {
+    const row = this.rows[this.index];
+    const key = row ? `${row.file.path}\n${this.query}` : "";
+    window.clearTimeout(this.previewTimer);
+    this.previewTimer = 0;
+    if (key === this.previewedKey) return;
+    this.previewTimer = window.setTimeout(() => {
+      this.previewTimer = 0;
+      void this.renderPreview();
+    }, PREVIEW_DEBOUNCE_MS);
   }
 
   private async renderPreview(): Promise<void> {
     const token = ++this.previewToken;
     const row = this.rows[this.index];
+    this.previewedKey = row ? `${row.file.path}\n${this.query}` : "";
     this.previewTitleEl.setText(row ? row.file.path : "");
     this.previewBodyEl.empty();
     if (!row) return;
@@ -425,6 +513,8 @@ export class ListModal extends Modal {
   private setQuery(query: string): void {
     if (query === this.query) return;
     this.query = query;
+    window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = 0;
     this.refresh(false);
   }
 
@@ -451,6 +541,26 @@ export class ListModal extends Modal {
     const win = doc.defaultView ?? window;
 
     this.inputEl.addEventListener("input", () => this.setQuery(this.inputEl.value));
+
+    const rowIndexOf = (evt: Event): number => {
+      const target = (evt.target as Element | null)?.closest?.<HTMLElement>(".nf-list-row") ?? null;
+      const i = target ? Number(target.dataset.index) : NaN;
+      return Number.isInteger(i) && i >= 0 ? i : -1;
+    };
+    this.listEl.addEventListener("click", (evt) => {
+      const i = rowIndexOf(evt);
+      if (i < 0) return;
+      evt.preventDefault();
+      this.select(i);
+      this.inputEl.focus();
+    });
+    this.listEl.addEventListener("dblclick", (evt) => {
+      const i = rowIndexOf(evt);
+      if (i < 0) return;
+      evt.preventDefault();
+      this.index = i;
+      void this.openSelected();
+    });
 
     const onKeyDown = (evt: KeyboardEvent) => this.handleKeyDown(evt);
     const onKeyUp = (evt: KeyboardEvent) => this.handleKeyUp(evt);

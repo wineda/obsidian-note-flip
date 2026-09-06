@@ -56,9 +56,9 @@
   --nf-radius: 10px;
 
   /* Aero palette */
-  --nf-glass-hi: rgba(235, 244, 255, 0.86);
-  --nf-glass-mid: rgba(205, 225, 248, 0.7);
-  --nf-glass-lo: rgba(150, 195, 240, 0.72);
+  --nf-glass-hi: rgba(235, 244, 255, 0.9);
+  --nf-glass-mid: rgba(205, 225, 248, 0.8);
+  --nf-glass-lo: rgba(150, 195, 240, 0.82);
   --nf-glass-border: rgba(255, 255, 255, 0.75);
   --nf-glass-inner: rgba(70, 115, 170, 0.35);
   --nf-title-text: #12294a;
@@ -123,14 +123,25 @@
     rotateY(var(--nf-tilt, 28deg));
   transition:
     transform var(--nf-anim, 320ms) var(--nf-ease),
-    opacity var(--nf-anim, 320ms) var(--nf-ease);
+    opacity var(--nf-anim, 320ms) var(--nf-ease),
+    visibility 0s linear 0s;
   cursor: pointer;
   will-change: transform;
 }
 
+/* Cards behind the visible depth fade out and are then dropped from rendering
+   altogether, so the compositor stops carrying a layer for each of them. The
+   visibility flip is delayed until the fade has finished and is immediate on
+   the way back in. */
 .nf-card.nf-hidden {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  will-change: auto;
+  transition:
+    transform var(--nf-anim, 320ms) var(--nf-ease),
+    opacity var(--nf-anim, 320ms) var(--nf-ease),
+    visibility 0s linear var(--nf-anim, 320ms);
 }
 
 .nf-stage.nf-enter .nf-card {
@@ -144,15 +155,38 @@
     rotateY(var(--nf-tilt, 28deg));
 }
 
-/* Depth shading: cards further back get a little darker. */
+/* Selection glow. It sits on its own pseudo-element and is faded in with
+   opacity, which the compositor animates without repainting the large blurred
+   shadow on every frame the way a box-shadow transition would. */
+.nf-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--nf-radius);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.9),
+    0 0 36px var(--nf-glow),
+    0 40px 90px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--nf-anim, 320ms) var(--nf-ease);
+}
+
+.nf-card.nf-front::before {
+  opacity: 1;
+}
+
+/* Depth shading: cards further back get a little darker. Animated through
+   opacity for the same reason as the glow. */
 .nf-card::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: var(--nf-radius);
-  background: rgba(4, 14, 30, calc(var(--d, 0) * 0.09));
+  background: rgb(4, 14, 30);
+  opacity: calc(var(--d, 0) * 0.09);
   pointer-events: none;
-  transition: background var(--nf-anim, 320ms) var(--nf-ease);
+  transition: opacity var(--nf-anim, 320ms) var(--nf-ease);
 }
 
 .nf-reflect .nf-card {
@@ -175,19 +209,11 @@
     0 2px 6px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.75),
     inset 0 0 0 1px var(--nf-glass-inner);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  /* No backdrop-filter on the cards themselves: blurring the backdrop of a
+     3D transformed element makes the compositor re-read and re-filter the
+     scene behind every card on every animation frame. The frosted look comes
+     from the full screen blur on .modal-bg plus the glass gradient instead. */
   overflow: hidden;
-  transition: box-shadow var(--nf-anim, 320ms) var(--nf-ease);
-}
-
-.nf-card.nf-front .nf-card-chrome {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.9),
-    0 0 36px var(--nf-glow),
-    0 40px 90px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    inset 0 0 0 1px var(--nf-glass-inner);
 }
 
 /* Glossy highlight across the top half of the frame, Vista style. */
@@ -394,8 +420,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nf-card,
-  .nf-card::after,
-  .nf-card-chrome {
+  .nf-card.nf-hidden,
+  .nf-card::before,
+  .nf-card::after {
     transition: none;
   }
 }

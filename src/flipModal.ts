@@ -46,10 +46,23 @@ const MIN_CARD_HEIGHT_PX = 160;
 /** Fallbacks for when the stage's computed style cannot be read. */
 const DEFAULT_PERSPECTIVE_PX = 1500;
 const DEFAULT_TITLE_HEIGHT_PX = 36;
+/** Longest wait for a quiet moment before the next preview is rendered anyway. */
+const IDLE_TIMEOUT_MS = 120;
 
 function lineY(line: ScreenLine, x: number): number {
   if (line.x2 === line.x1) return line.y1;
   return line.y1 + ((line.y2 - line.y1) * (x - line.x1)) / (line.x2 - line.x1);
+}
+
+/** Resolves when the browser has a quiet moment, so DOM work stays out of the animation frames. */
+function idle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => resolve(), { timeout: IDLE_TIMEOUT_MS });
+    } else {
+      window.setTimeout(resolve, 16);
+    }
+  });
 }
 
 /**
@@ -69,6 +82,9 @@ export class FlipModal extends Modal {
   private lastClickX = 0;
   private lastClickY = 0;
   private opening = false;
+  /** Visible cards waiting for their preview; rendered one at a time, nearest to the front first. */
+  private renderQueue: Card[] = [];
+  private rendering = false;
   /**
    * Upward offset (in untransformed px) of a card at each depth 0..visibleDepth,
    * chosen so that every card's title bar stays clear of the card in front.
@@ -123,6 +139,7 @@ export class FlipModal extends Modal {
 
   onClose(): void {
     this.renderComponent.unload();
+    this.renderQueue = [];
     this.cardPool.clear();
     this.cards = [];
     this.contentEl.empty();
@@ -220,6 +237,43 @@ export class FlipModal extends Modal {
     if (Platform.isMobile) void this.openSelected();
   }
 
+  /**
+   * Queue a card's preview. Previews are rendered one after another with a
+   * pause in between rather than all at once, so that opening the stack does
+   * not pile several Markdown renders on top of the entrance animation. The
+   * card nearest the front is always rendered next.
+   */
+  private queueRender(card: Card): void {
+    if (card.rendered || this.renderQueue.includes(card)) return;
+    this.renderQueue.push(card);
+    void this.drainRenderQueue();
+  }
+
+  private async drainRenderQueue(): Promise<void> {
+    if (this.rendering) return;
+    this.rendering = true;
+    try {
+      while (this.renderQueue.length && this.cards.length) {
+        const n = this.cards.length;
+        const distance = (card: Card) => {
+          const i = this.cards.indexOf(card);
+          return i < 0 ? Infinity : (i - this.index + n) % n;
+        };
+        let best = 0;
+        for (let k = 1; k < this.renderQueue.length; k++) {
+          if (distance(this.renderQueue[k]) < distance(this.renderQueue[best])) best = k;
+        }
+        const [card] = this.renderQueue.splice(best, 1);
+        // Filtered out meanwhile; it is queued again if it comes back.
+        if (!card.el.isConnected) continue;
+        await this.renderCard(card);
+        if (this.renderQueue.length) await idle();
+      }
+    } finally {
+      this.rendering = false;
+    }
+  }
+
   private async renderCard(card: Card): Promise<void> {
     card.rendered = true;
     const s = this.plugin.settings;
@@ -227,6 +281,10 @@ export class FlipModal extends Modal {
     try {
       text = await this.app.vault.cachedRead(card.file);
     } catch {
+      return;
+    }
+    if (!card.el.isConnected) {
+      card.rendered = false;
       return;
     }
     text = text.replace(FRONTMATTER_RE, "").trimStart();
@@ -293,7 +351,7 @@ export class FlipModal extends Modal {
       card.el.style.zIndex = String(n - d);
       card.el.toggleClass("nf-hidden", !visible);
       card.el.toggleClass("nf-front", d === 0);
-      if (visible && !card.rendered) void this.renderCard(card);
+      if (visible) this.queueRender(card);
     });
     this.counterEl.setText(n ? `${this.index + 1} / ${n}` : "0 / 0");
     this.queryEl.setText(this.query);
